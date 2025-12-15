@@ -253,18 +253,23 @@ impl BLEClient {
     let client = unsafe { voidp_to_ref::<Self>(arg) };
 
     match event.type_ as _ {
+      BLE_GAP_EVENT_LINK_ESTAB | BLE_GAP_EVENT_DISC_COMPLETE => {
+        client.state.signal.signal(0);
+      }
       BLE_GAP_EVENT_CONNECT => {
         let connect = unsafe { &event.__bindgen_anon_1.connect };
 
         if connect.status == 0 {
           client.state.conn_handle = connect.conn_handle;
 
-          let rc =
-            unsafe { ble_gattc_exchange_mtu(connect.conn_handle, None, core::ptr::null_mut()) };
+          // let rc =
+          //   unsafe { ble_gattc_exchange_mtu(connect.conn_handle, None, core::ptr::null_mut()) };
 
-          if rc != 0 {
-            client.state.signal.signal(rc as _);
-          }
+          // ::log::info!("Completed exchange MTU");
+          // if rc != 0 {
+          //   client.state.signal.signal(rc as _);
+            client.state.signal.signal(0 as _);
+          // }
         } else {
           ::log::info!("connect_status {}", connect.status);
           client.state.conn_handle = esp_idf_sys::BLE_HS_CONN_HANDLE_NONE as _;
@@ -302,6 +307,20 @@ impl BLEClient {
 
         client.state.signal.signal(enc_change.status as _);
       }
+      BLE_GAP_EVENT_DATA_LEN_CHG => {
+        let data_len_chg = unsafe{ &event.__bindgen_anon_1.data_len_chg };
+        if client.state.conn_handle != data_len_chg.conn_handle {
+          return 0;
+        }
+
+        ::log::info!(
+          "data len chg event; conn_handle={}, max_tx={}, max_rx={}",
+          data_len_chg.conn_handle,
+          data_len_chg.max_tx_octets,
+          data_len_chg.max_rx_octets,
+        );
+        // client.state.signal.signal(0);
+      }
       BLE_GAP_EVENT_MTU => {
         let mtu = unsafe { &event.__bindgen_anon_1.mtu };
         if client.state.conn_handle != mtu.conn_handle {
@@ -319,7 +338,7 @@ impl BLEClient {
         if client.state.conn_handle != notify_rx.conn_handle {
           return 0;
         }
-
+        ::log::error!("nimble: notify for {}", notify_rx.attr_handle);
         if let Some(services) = &mut client.state.services {
           for service in services {
             if service.state.end_handle < notify_rx.attr_handle {
